@@ -1,0 +1,285 @@
+library(stats)
+library(tseries)
+library(TSA)
+library(car)
+library(nortest)
+library(lmtest)
+library(leaps)
+tax<-read.csv("taxes.csv",header=TRUE)
+########split data sets#########
+set.seed(123)
+train<-tax[-c(221:245),]
+test<-tax[221:245,]
+alc<-ts(tax[,2],start=c(1996,4),freq=12)
+unemp<-ts(tax[,3],start=c(1996,4),freq=12)
+cig<-ts(tax[,4],start=c(1996,4),freq=12)
+per<-ts(tax[,5],start=c(1996,4),freq=12)
+alc.train<-window(alc,start=c(1996,4),end=c(2014,8))
+alc.test<-window(alc,start=c(2014,9))
+unemp.train<-window(unemp,start=c(1996,4),end=c(2014,8))
+unemp.test<-window(unemp,start=c(2014,9))
+cig.train<-window(cig,start=c(1996,4),end=c(2014,8))
+cig.test<-window(cig,start=c(2014,9))
+per.train<-window(per,start=c(1996,4),end=c(2014,8))
+per.test<-window(per,start=c(2014,9))
+
+#quantitative summary graphical summary
+summary(alc)
+summary(unemp)
+summary(cig)
+summary(per)
+par(mfrow=c(2,2))
+boxplot(alc.train~cycle(alc.train),names=month.abb,main=names(tax)[2])
+boxplot(unemp.train~cycle(unemp.train),names=month.abb,main=names(tax)[3])
+boxplot(cig.train~cycle(cig.train),names=month.abb,main=names(tax)[4])
+boxplot(per.train~cycle(per.train),names=month.abb,main=names(tax)[5])
+
+#######analysis on reponse 
+par(mfrow=c(2,1))
+acf(alc.train,main=names(tax)[2])
+pacf(alc.train,main=names(tax)[2])
+acf(alc.train,main=names(tax)[2])
+kpss.test(alc.train)
+
+#simple linear regression 
+fit<-lm(alc.train~time(alc.train))
+summary(fit)
+plot(fit)
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(ksmooth(time(alc.train), alc.train, "normal", bandwidth=5/52),col="red")
+lines(ksmooth(time(alc.train), alc.train, "normal", bandwidth=2),col="blue")
+
+#feature selection
+trend=time(alc.train)
+u1=unemp.train
+c1=cig.train-mean(cig.train)
+p1=per.train-mean(per.train)
+sin1=sin(trend)
+cos1=cos(trend)
+data<-cbind(alc.train,trend,sin1,cos1,u1,c1,p1)
+colnames(data)<-c("alc.train","trend","sin1","cos1","u1","c1","p1")  
+data<-data.frame(data)
+
+sin1=sin(alc.test)
+cos1=cos(alc.test)
+u1=unemp.test
+c1=cig.test-mean(cig.test)
+p1=per.test-mean(per.test)
+data.test<-cbind(alc.test, sin1,cos1, u1, c1, p1)
+colnames(data.test)<-c("alc.test","sin1","cos1","u1","c1","p1")  
+data.test<-data.frame(data.test)
+
+data.fwd=regsubsets(alc.train~trend+sin1+cos1+u1+c1+p1,data=data,nvmax=10,method="forward")
+reg.summary=summary(data.fwd)
+par(mfrow=c(2,2))
+plot(reg.summary$rss,xlab="Number of Variables",ylab="RSS",type="l")
+plot(reg.summary$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+which.max(reg.summary$adjr2)
+points(5,reg.summary$adjr2[5], col="red",cex=2,pch=20)
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp",type='l')
+which.min(reg.summary$cp)
+points(5,reg.summary$cp[5],col="red",cex=2,pch=20)
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",type='l')
+which.min(reg.summary$bic)
+points(3,reg.summary$bic[3],col="red",cex=2,pch=20)
+names(coef(data.fwd,5))
+fit=lm(alc.train~sin1+cos1+u1+c1+p1, data=data)
+summary(fit)
+predict=predict(fit,data.test[,-1])
+predict=ts(predict, freq=12, start=c(2014,9))
+confidence=predict(fit,data.test[,-1], interval='prediction',level=0.95)
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2014,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2014,9))
+
+#regression with lagged variables 
+lag1.plot(alc.train,12)
+acf(alc.train)
+dummy=ifelse(alc.train<17000, 0, 1)
+fish=ts.intersect(alc.train,alc.train6=lag(alc.train,-6), alc.train12=lag(alc.train,-12),dummy6=lag(dummy,-6),dframe = TRUE)
+summary(fit<-lm(alc.train~alc.train6*dummy6+alc.train12, data=fish, na.action=NULL))
+
+mean(fitted(fit)-fish$alc.train)
+#test
+dummy=ifelse(alc.test<17000, 0, 1)
+fish.test=ts.intersect(alc.test,alc.train6=lag(alc.test,-6), alc.train12=lag(alc.test,-12),dummy6=lag(dummy,-6),dframe = TRUE)
+#precict
+predict=predict(fit,fish.test[,-1])
+predict=ts(predict, freq=12, start=c(2014,9))
+confidence=predict(fit,fish.test[,-1], interval='prediction',level=0.95)
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2014,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2014,9))
+par(mfrow=c(1,1))
+#plot
+plot(window(alc,start=c(2014,9), end=c(2015,8)),ylab='alc',type="o",lty=1,ylim=range(alc.test,predict,confidence.lwr,confidence.upr,43000))
+points(predict,type="b",pch="*",lty=2,col="red")
+lines(confidence.lwr,col='blue')
+lines(confidence.upr,col='blue')
+legend("topright",c("data","predictions","lower CL","upper CL"), pch=c("o","*",NA,NA),
+       lty=c(2,3,1,1),bty='n')
+
+#prediction: regression with lagged variables
+dummy=ifelse(alc<17000, 0, 1)
+fish=ts.intersect(alc,alc.train6=lag(alc,-6), alc.train12=lag(alc,-12),dummy6=lag(dummy,-6),dframe = TRUE)
+summary(fit<-lm(alc~alc.train6*dummy6+alc.train12, data=fish, na.action=NULL))
+
+mean(fitted(fit)-fish$alc)
+
+confidence=predict(fit,fish.test[,-1], interval='prediction',level=0.95)
+predict=ts(confidence[,1], freq=12, start=c(2015,9))
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2015,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2015,9))
+par(mfrow=c(1,1))
+
+plot(window(predict,start=c(2015,9), end=c(2016,8)),ylab='alc',type="b",pch="*",lty=2,col="red",ylim=range(10000,40000))
+lines(confidence.lwr,col='blue')
+lines(confidence.upr,col='blue')
+legend("topright",c("predictions","lower CL","upper CL"), pch=c("*",NA,NA),
+       lty=c(3,1,1),bty='n')
+
+#use total set to predict
+trend=time(alc)
+u1=unemp
+c1=cig-mean(cig)
+p1=per-mean(per)
+sin1=sin(trend)
+cos1=cos(trend)
+baddata<-cbind(alc,trend,sin1,cos1,u1,c1,p1)
+colnames(baddata)<-c("alc","trend","sin1","cos1","u1","c1","p1")
+baddata<-data.frame(baddata)
+
+fit=lm(alc~sin1+cos1+u1+c1+p1, data=baddata)
+summary(fit)
+predict=predict(fit,baddata.test[,-1])
+predict=ts(predict, freq=12, start=c(2014,9))
+confidence=predict(fit,baddata.test[,-1], interval='prediction',level=0.95)
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2014,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2014,9))
+
+#decompose
+alc.decomp<-decompose(alc,type="mult")
+plot(alc.decomp)
+trend<-alc.decomp$trend
+season<-alc.decomp$seasonal
+random<-alc.decomp$random
+plot(trend*random,main="deseasonalized")
+plot(season*random,main="detrended")
+
+### Kernel Smoother
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(ksmooth(time(alc.train), alc.train, "normal", bandwidth=5/52),col="red")
+lines(ksmooth(time(alc.train), alc.train, "normal", bandwidth=2),col="blue")
+
+###Holt_Winters
+alc.seaadd<-HoltWinters(alc.train, seasonal="additive")
+alc.seaadd
+alc.seaadd$SSE
+
+alc.seamul<-HoltWinters(alc.train, seasonal="mult")
+alc.seamul
+alc.seamul$SSE
+alc.pred<-predict(alc.seamul,n.ahead=2*12,prediction.interval=TRUE,level=0.95)
+plot(alc.pred[,1],col="red",main="Holt-Winters Prediction(test set)",ylim=c(10000,40000))
+lines(alc.pred[,2],col="blue",lty=2)
+lines(alc.pred[,3],col="blue",lty=2)
+lines(alc.test,col="black")
+legend("topright",c("true value","predictions","lower CL","upper CL"),lty=c(1,1,2,2),bty='n',col=c("black","red","blue","blue"))
+fit<-ts(alc.pred[,1],start=c(2014,9),freq=12)
+upper<-ts(alc.pred[,2],start=c(2014,9),freq=12)
+lower<-ts(alc.pred[,3],start=c(2014,9),freq=12)
+ifelse((alc.test>lower)&(alc.test<upper),"in","out")
+
+###future prediction
+alc.seamul<-HoltWinters(alc, seasonal="mult")
+alc.seamul
+alc.pred<-predict(alc.seamul,n.ahead=2*12,prediction.interval=TRUE,level=0.95)
+plot(alc.pred[,1],col="red", main="Holt-Winters Prediction (future)",ylim=c(10000,40000))
+lines(alc.pred[,2],col="blue",lty="dashed")
+lines(alc.pred[,3],col="blue",lty="dashed")
+lines(alc.test,col="black")
+legend("topright",c("predictions","lower CL","upper CL"),lty=c(1,2,2),bty='n',col=c("red","blue","blue"))
+
+
+fit<-ts(alc.pred[,1],start=c(2014,9),freq=12)
+upper<-ts(alc.pred[,2],start=c(2014,9),freq=12)
+lower<-ts(alc.pred[,3],start=c(2014,9),freq=12)
+ifelse((alc.test>lower)&(alc.test<upper),"in","out")
+sum((alc.test-fit)^2)
+cbind(alc.test, fit)
+
+alc.seamul<-HoltWinters(alc, seasonal="mult")
+alc.seamul
+alc.pred<-predict(alc.seamul,n.ahead=2*12,prediction.interval=TRUE,level=0.95)
+plot(alc.pred[,1],col="red", main="Holt-Winters Prediction (future)")
+lines(alc.pred[,2],col="blue",lty="dashed")
+lines(alc.pred[,3],col="blue",lty="dashed")
+
+###Arima model
+best.arima <- function(x, maxord = c(1,1,1))
+{
+  best.aic <- 100000000
+  n <- length(x)
+  for (p in 0:maxord[1]) for(d in 0:maxord[2]) for(q in 0:maxord[3])
+  {
+    fit <- arima(x, order = c(p,d,q),method="ML",xreg=cbind(cig.train,per.train))
+    fit.aic <- -2 * fit$loglik + 2 * length(fit$coef)
+    if (fit.aic < best.aic)
+    {
+      best.aic <- fit.aic
+      best.fit <- fit
+      best.model <- c(p,d,q)
+    }
+  }
+  list(best.aic, best.fit, best.model)
+}
+
+best.arima(alc.train,maxord = c(3,3,3))
+fitted<-arima(alc.train,order=c(3,0,3),method="ML",xreg=cbind(cig.train,per.train))
+forecast<-predict(fitted,n.ahead=24,newxreg=cbind(cig.test,per.test))
+plot(forecast$pred,col="red",main="ARIMA(3,0,3)prediction",ylim=c(7000,40000))
+lines(alc.test)
+lines(forecast$pred + 1.96*forecast$se, lty="dashed", col=4)
+lines(forecast$pred - 1.96*forecast$se, lty="dashed", col=4)
+legend("topright",c("real value","predictions","lower CL","upper CL"),
+       lty=c(1,2,2),bty='n',col=c("black","red","blue","blue"))
+truevalue<-alc.test
+predictvalue<-forecast$pred
+forecast$se
+lowerbound<-forecast$pred - 1.68*forecast$se
+upperbound<-forecast$pred + 1.68*forecast$se
+result<-cbind(truevalue,predictvalue,lowerbound,upperbound)
+inorout<-rep("in",dim(result)[1])
+for (i in 1:dim(result)[1]){
+  if (result[i,1]<result[i,3]){inorout[i]="out"}
+  if (result[i,1]>result[i,4]){inorout[i]="out"}
+}
+result<-cbind(result,inorout)
+result
+
+###Sarima model
+n.auto<-auto.arima(alc.train,stepwise=FALSE,approx=FALSE,trace=T)
+fitted<-arima(alc.train,order=c(2,1,1),seasonal=list(order=c(1,1,0),period=12),method="ML",xreg=cbind(cig.train,per.train))
+summary(fitted)
+forecast<-predict(fitted,n.ahead=24,newxreg=cbind(cig.test,per.test))
+plot(forecast$pred,col="red",main="ARIMA(2,1,1)(1,1,0)[12] prediction",ylim=c(10000,40000))
+lines(alc.test)
+lines(forecast$pred + 1.96*forecast$se, lty="dashed", col=4)
+lines(forecast$pred - 1.96*forecast$se, lty="dashed", col=4)
+legend("topright",c("real value","predictions","lower CL","upper CL"),
+       lty=c(1,1,2,2),bty='n',col=c("black","red","blue","blue"))
+truevalue<-alc.test
+predictvalue<-forecast$pred
+forecast$se
+lowerbound<-forecast$pred - 1.96*forecast$se
+upperbound<-forecast$pred + 1.96*forecast$se
+result<-cbind(truevalue,predictvalue,lowerbound,upperbound)
+inorout<-rep("in",dim(result)[1])
+for (i in 1:dim(result)[1]){
+  if (result[i,1]<result[i,3]){inorout[i]="out"}
+  if (result[i,1]>result[i,4]){inorout[i]="out"}
+}
+result<-cbind(result,inorout)
+result
+
+qqnorm(fitted$residuals)
+lillie.test(fitted$residuals)
+acf(fitted$residuals)
