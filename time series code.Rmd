@@ -1,0 +1,437 @@
+---
+title: "Untitled"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r}
+library(astsa)
+library(stats)
+library(tseries)
+library(TSA)
+library(car)
+library(nortest)
+library(lmtest)
+library(leaps)
+tax<-read.csv("/Users/anmoe/Desktop/taxes.csv",header=TRUE)
+head(tax)
+set.seed(123)
+train<-tax[-c(221:245),]
+test<-tax[221:245,]
+alc<-ts(tax[,2],start=c(1996,4),freq=12)
+unemp<-ts(tax[,3],start=c(1996,4),freq=12)
+cig<-ts(tax[,4],start=c(1996,4),freq=12)
+per<-ts(tax[,5],start=c(1996,4),freq=12)
+alc.train<-window(alc,start=c(1996,4),end=c(2014,8))
+alc.test<-window(alc,start=c(2014,9))
+unemp.train<-window(unemp,start=c(1996,4),end=c(2014,8))
+unemp.test<-window(unemp,start=c(2014,9))
+cig.train<-window(cig,start=c(1996,4),end=c(2014,8))
+cig.test<-window(cig,start=c(2014,9))
+per.train<-window(per,start=c(1996,4),end=c(2014,8))
+per.test<-window(per,start=c(2014,9))
+
+par(mfrow=c(2,2))
+plot(alc.train,main=names(tax)[2])
+plot(unemp.train,main=names(tax)[3])
+plot(cig.train,main=names(tax)[4])
+plot(per.train,main=names(tax)[5])
+summary(alc.train)
+summary(unemp.train)
+summary(cig.train)
+summary(per.train)
+
+par(mfrow=c(2,2))
+boxplot(alc.train~cycle(alc.train),names=month.abb,main=names(tax)[2])
+boxplot(unemp.train~cycle(unemp.train),names=month.abb,main=names(tax)[3])
+boxplot(cig.train~cycle(cig.train),names=month.abb,main=names(tax)[4])
+boxplot(per.train~cycle(per.train),names=month.abb,main=names(tax)[5])
+pairs(train[,2:5])
+cor(train[,2:5])
+```
+multiple linear regression
+```{r}
+trend=time(alc.train)
+u1=unemp.train
+c1=cig.train-mean(cig.train)
+p1=per.train-mean(per.train)
+
+#c2=c1^2
+#u2=u1^2
+p2=p1^2
+
+c3=c1^3
+#u3=u1^3
+p3=p1^3
+
+fit=lm(alc.train~trend+u1+c1+p1, na.action=NULL)
+summary(aov(fit))
+num=length(alc.train)
+AIC(fit)/num-log(2*pi)
+BIC(fit)/num-log(2*pi)
+
+predict(fit, newdata = test)
+plot(alc.train, type='o')
+abline(fit)
+```
+feature selection
+```{r}
+trend=time(alc.train)
+u1=unemp.train
+c1=cig.train-mean(cig.train)
+p1=per.train-mean(per.train)
+sin1=sin(trend)
+cos1=cos(trend)
+data<-cbind(alc.train,trend,sin1,cos1,u1,c1,p1)
+colnames(data)<-c("alc.train","trend","sin1","cos1","u1","c1","p1")  
+data<-data.frame(data)
+
+sin1=sin(alc.test)
+cos1=cos(alc.test)
+u1=unemp.test
+c1=cig.test-mean(cig.test)
+p1=per.test-mean(per.test)
+data.test<-cbind(alc.test, sin1,cos1, u1, c1, p1)
+colnames(data.test)<-c("alc.test","sin1","cos1","u1","c1","p1")  
+data.test<-data.frame(data.test)
+
+data.fwd=regsubsets(alc.train~trend+sin1+cos1+u1+c1+p1,data=data,nvmax=10,method="forward")
+reg.summary=summary(data.fwd)
+par(mfrow=c(2,2))
+plot(reg.summary$rss,xlab="Number of Variables",ylab="RSS",type="l")
+plot(reg.summary$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+which.max(reg.summary$adjr2)
+points(5,reg.summary$adjr2[5], col="red",cex=2,pch=20)
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp",type='l')
+which.min(reg.summary$cp)
+points(5,reg.summary$cp[5],col="red",cex=2,pch=20)
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",type='l')
+which.min(reg.summary$bic)
+points(3,reg.summary$bic[3],col="red",cex=2,pch=20)
+names(coef(data.fwd,5))
+fit=lm(alc.train~sin1+cos1+u1+c1+p1, data=data)
+summary(fit)
+predict=predict(fit,data.test[,-1])
+predict=ts(predict, freq=12, start=c(2014,9))
+confidence=predict(fit,data.test[,-1], interval='prediction',level=0.95)
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2014,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2014,9))
+```
+regression with lagged variables 
+```{r}
+lag1.plot(alc.train,12)
+acf(alc.train)
+dummy=ifelse(alc.train<17000, 0, 1)
+fish=ts.intersect(alc.train,alc.train6=lag(alc.train,-6), alc.train12=lag(alc.train,-12),dummy6=lag(dummy,-6),dframe = TRUE)
+summary(fit<-lm(alc.train~alc.train6*dummy6+alc.train12, data=fish, na.action=NULL))
+
+mean(fitted(fit)-fish$alc.train)
+#test
+dummy=ifelse(alc.test<17000, 0, 1)
+fish.test=ts.intersect(alc.test,alc.train6=lag(alc.test,-6), alc.train12=lag(alc.test,-12),dummy6=lag(dummy,-6),dframe = TRUE)
+#precict
+predict=predict(fit,fish.test[,-1])
+predict=ts(predict, freq=12, start=c(2014,9))
+confidence=predict(fit,fish.test[,-1], interval='prediction',level=0.95)
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2014,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2014,9))
+par(mfrow=c(1,1))
+#plot
+plot(window(alc,start=c(2014,9), end=c(2015,8)),ylab='alc',type="o",lty=1,ylim=range(alc.test,predict,confidence.lwr,confidence.upr,43000))
+points(predict,type="b",pch="*",lty=2,col="red")
+lines(confidence.lwr,col='blue')
+lines(confidence.upr,col='blue')
+legend("topright",c("data","predictions","lower CL","upper CL"), pch=c("o","*",NA,NA),
+lty=c(2,3,1,1),bty='n')
+```
+prediction: regression with lagged variables  
+```{r}
+dummy=ifelse(alc<17000, 0, 1)
+fish=ts.intersect(alc,alc.train6=lag(alc,-6), alc.train12=lag(alc,-12),dummy6=lag(dummy,-6),dframe = TRUE)
+summary(fit<-lm(alc~alc.train6*dummy6+alc.train12, data=fish, na.action=NULL))
+
+mean(fitted(fit)-fish$alc)
+
+confidence=predict(fit,fish.test[,-1], interval='prediction',level=0.95)
+predict=ts(confidence[,1], freq=12, start=c(2015,9))
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2015,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2015,9))
+par(mfrow=c(1,1))
+
+plot(window(predict,start=c(2015,9), end=c(2016,8)),ylab='alc',type="b",pch="*",lty=2,col="red",ylim=range(10000,40000))
+lines(confidence.lwr,col='blue')
+lines(confidence.upr,col='blue')
+legend("topright",c("predictions","lower CL","upper CL"), pch=c("*",NA,NA),
+lty=c(3,1,1),bty='n')
+```
+
+
+```{r}
+par(mfrow=c(1,1))
+plot(alc.test,ylab='alc',type="o",lty=1,ylim=range(alc.test,predict,confidence.lwr,confidence.upr,43000))
+points(predict,type="b",pch="*",lty=2,col="red")
+lines(confidence.lwr,col='blue')
+lines(confidence.upr,col='blue')
+legend("topright",c("data","predictions","lower CL","upper CL"), pch=c("o","*",NA,NA),
+lty=c(2,3,1,1),bty='n')
+```
+use total set to predict
+```{r}
+trend=time(alc)
+u1=unemp
+c1=cig-mean(cig)
+p1=per-mean(per)
+sin1=sin(trend)
+cos1=cos(trend)
+baddata<-cbind(alc,trend,sin1,cos1,u1,c1,p1)
+colnames(baddata)<-c("alc","trend","sin1","cos1","u1","c1","p1")
+baddata<-data.frame(baddata)
+
+fit=lm(alc~sin1+cos1+u1+c1+p1, data=baddata)
+summary(fit)
+predict=predict(fit,baddata.test[,-1])
+predict=ts(predict, freq=12, start=c(2014,9))
+confidence=predict(fit,baddata.test[,-1], interval='prediction',level=0.95)
+confidence.lwr=ts(confidence[,2], freq=12, start=c(2014,9))
+confidence.upr=ts(confidence[,3], freq=12, start=c(2014,9))
+```
+
+VIF
+```{r}
+TAX<-ts(train[,2:5],start=c(1996,4),freq=12)
+TAX.lm<-lm(Alcoholic.Beverage.Tax~Unemployment.rate+Cigarette.Tax+Personal.Income.Tax,data=TAX)
+TAX.vif<-vif(TAX.lm)
+TAX.vif
+```
+
+```{r}
+par(mfrow=c(2,2))
+acf(alc.train,main=names(tax)[2])
+acf(unemp.train,main=names(tax)[3])
+acf(cig.train,main=names(tax)[4])
+acf(per.train,main=names(tax)[5])
+
+pacf(alc.train,main=names(tax)[2])
+pacf(unemp.train,main=names(tax)[3])
+pacf(cig.train,main=names(tax)[4])
+pacf(per.train,main=names(tax)[5])
+
+par(mfrow=c(3,1))
+ccf(alc.train,unemp.train)
+ccf(alc.train,cig.train)
+ccf(alc.train,per.train)
+```
+
+stationary test
+```{r}
+####Dickey-Fuller test for stationarity p---0, reject
+adf.test(alc.train) 
+adf.test(unemp.train)
+adf.test(cig.train)
+adf.test(per.train)
+####Alc,Cig,Per are stationary
+
+####Phillips-Perron test for stationarity
+#=================start==========================
+pp.test(alc.train)#s
+pp.test(unemp.train)#n
+pp.test(cig.train)#s
+pp.test(per.train)#s
+####Alc,Cig,Per are stationary
+
+####
+kpss.test(alc)#n
+kpss.test(unemp)#n
+kpss.test(cig)#n
+kpss.test(per)#s
+```
+
+
+
+```{r}
+###Regression methods#################
+#=================start==========================
+fit<-lm(alc.train~time(alc.train))
+summary(fit)
+acf(fit$residuals)
+plot(alc.train,type="o")
+abline(fit)
+hist(rstudent(fit),xlab="Standardized Residuals",main="linear")
+qqnorm(rstudent(fit))
+library(lmtest)
+#two-sided alternative
+dwtest(fit, alternative = "two.sided") #autocorrelation =0
+lillie.test(fit$residuals) #nonnormality
+bptest(fit)#constant variance 
+
+month=season(alc.train)
+m1<-lm(alc.train~month-1)
+summary(m1)
+acf(m1$residuals)
+dwtest(m1, alternative = "two.sided") #autocorrelation not 0
+lillie.test(m1$residuals) #nonnormality
+bptest(m1)#non constant variance 
+
+har=harmonic(alc.train,1)
+m2<-lm(alc.train~har)
+summary(m2)
+acf(m2$residuals)
+dwtest(m2, alternative = "two.sided") #autocorrelation not 0
+lillie.test(m2$residuals) #nonnormality
+bptest(m2)#non constant variance 
+
+###############
+fit1<-lm(alc.train~time(alc.train)+cig.train)
+summary(fit1)
+acf(fit1$residuals)
+par(mfrow=c(2,2))
+plot(fit1)
+hist(rstudent(fit1),xlab="Standardized Residuals",main="linear")
+qqnorm(rstudent(fit1))
+library(lmtest)
+#two-sided alternative
+dwtest(fit1, alternative = "two.sided") #autocorrelation =0
+lillie.test(fit1$residuals) #nonnormality
+bptest(fit1)#constant variance 
+
+```
+diff
+```{r}
+plot(diff(alc.train),type="o",main="first difference")
+acf(diff(alc.train))
+pacf(diff(alc.train))
+```
+
+smoothing
+```{r}
+library(astsa)
+# 5-point moving average
+ma5 = filter(alc.train, sides=2, rep(1,5)/5)
+# unequal weights
+ma5u = filter(alc.train, sides=2, c(.5/5, 1.5/5, 1/5, 1.5/5, .5/5))
+#53-point moving average
+ma53 = filter(alc.train, sides=2, rep(1,53)/53)
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(ma5, col="blue")
+lines(ma5u, col="red")
+lines(ma53)
+ma2 = filter(alc.train, sides=2, rep(1,2)/2)
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(ma2, col="blue")
+```
+
+
+polynomial regression
+```{r}
+wk = time(alc.train) - mean(time(alc.train))
+wk2=wk^2
+wk3=wk^3
+reg1 = lm(alc.train~wk + wk2 + wk3, na.action=NULL)
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(fitted(reg1))
+## Polynomial regression (cubic smoother) plus periodic regression
+cs = cos(2*pi*wk)
+sn = sin(2*pi*wk)
+reg2 = lm(alc.train~wk + wk2 + wk3 + cs + sn, na.action=NULL)
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(fitted(reg2))
+# both fits
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(fitted(reg1))
+lines(fitted(reg2))
+```
+### Kernel Smoother
+```{r}
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(ksmooth(time(alc.train), alc.train, "normal", bandwidth=5/52))
+lines(ksmooth(time(alc.train), alc.train, "normal", bandwidth=2))
+```
+#####Nearest Neighbor Regression
+```{r}
+plot(alc.train, type="p", ylab=names(tax)[2], main="nearest neighbor")
+lines(supsmu(time(alc.train), alc.train, span=.5))
+lines(supsmu(time(alc.train), alc.train, span=0.000000001))
+```
+Lowess
+```{r}
+plot(alc.train, type="p", ylab=names(tax)[2], main="lowess")
+lines(lowess(alc.train, f=.02))
+lines(lowess(alc.train, f=2/3))
+```
+
+Smoothing Splines
+```{r}
+plot(alc.train, type="p", ylab=names(tax)[2])
+lines(smooth.spline(time(alc.train), alc.train))
+lines(smooth.spline(time(alc.train), alc.train))
+```
+
+```{r}
+#Lowess fit
+plot(cig.train, alc.train, main="lowess", xlab=names(tax)[4], ylab=names(tax)[2])
+lines(lowess(cig.train,alc.train))
+
+plot(unemp.train, alc.train, main="lowess", xlab=names(tax)[3], ylab=names(tax)[2])
+lines(lowess(unemp.train,alc.train))
+
+plot(per.train, alc.train, main="lowess", xlab=names(tax)[5], ylab=names(tax)[2])
+lines(lowess(per.train,alc.train))
+
+#smoothing spline fit
+plot(cig.train, alc.train, main="smoothing splines", xlab=names(tax)[4], ylab=names(tax)[2])
+lines(smooth.spline(cig.train, alc.train))
+
+plot(unemp.train, alc.train, main="smoothing splines", xlab=names(tax)[3], ylab=names(tax)[2])
+lines(smooth.spline(unemp.train, alc.train))
+
+plot(per.train, alc.train, main="smoothing splines", xlab=names(tax)[5], ylab=names(tax)[2])
+lines(smooth.spline(per.train, alc.train))
+```
+
+exponential 
+```{r}
+alc.exp<-HoltWinters(alc.train,beta=F,gamma=F)
+plot(alc.exp)
+alc.exp
+alc.exp$SSE
+```
+prediction hw
+```{r}
+alc.seamul<-HoltWinters(alc.train, seasonal="mult")
+alc.seamul
+alc.seamul$coefficients
+alc.seamul$SSE
+plot(alc.seamul$fitted)
+plot(alc.seamul)
+
+alc.seaadd<-HoltWinters(alc.train, seasonal="additive")
+alc.seaadd
+alc.seaadd$coefficients
+alc.seaadd$SSE
+plot(alc.seaadd$fitted)
+plot(alc.seaadd)
+
+alc.pred<-predict(alc.seamul,n.ahead=2*12,prediction.interval=TRUE,level=0.95)
+plot(alc.seamul, alc.pred)
+lines(alc.test,col="black")
+
+plot(alc.pred[,1],col="red")
+lines(alc.pred[,2],col="blue")
+lines(alc.pred[,3],col="blue")
+lines(alc.test,col="black")
+fit<-ts(alc.pred[,1],start=c(2014,9),freq=12)
+upper<-ts(alc.pred[,2],start=c(2014,9),freq=12)
+lower<-ts(alc.pred[,3],start=c(2014,9),freq=12)
+ifelse((alc.test>lower)&(alc.test<upper),"in","out")
+sum((alc.test-fit)^2)
+cbind(alc.test, fit)
+```
+decompose 
+```{r}
+alc.decomp_mul<-decompose(alc,type="mult")
+plot(alc.decomp_mul)
+
+alc.decomp_add<-decompose(alc,type="additive")
+plot(alc.decomp_add)
+```
